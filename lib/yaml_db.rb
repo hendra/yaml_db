@@ -57,13 +57,39 @@ module YamlDb
   end
 
   class Load < SerializationHelper::Load
+    # Monkey path to reorder truncatation and table loads to respect foreign key dependencies
     def self.load_documents(io, truncate = true)
-        YAML.load_stream(io) do |ydoc|
-          ydoc.keys.each do |table_name|
-            next if ydoc[table_name].nil?
-            load_table(table_name, ydoc[table_name], truncate)
-          end
+      yall = {}
+      YAML.load_stream(io) do |ydoc|
+        yall.merge!(ydoc)
+      end
+
+      unordered_tables = yall.keys.reject { |table| ['ar_internal_metadata', 'schema_info', 'schema_migrations'].include?(table) }.sort
+      tables = []
+      while unordered_tables.any?
+        loadable_tables = unordered_tables.find_all do |table|
+          foreign_keys = ActiveRecord::Base.connection.foreign_keys(table)
+          foreign_keys.reject { |foreign_key| tables.include?(foreign_key.to_table) }.empty?
         end
+
+        if loadable_tables.empty?
+          abort("Unable to sequence the following tables for loading: " + unordered_tables.join(', '))
+        end
+
+        tables += loadable_tables
+        unordered_tables -= loadable_tables
+      end
+
+      if truncate == true
+        tables.reverse.each do |table|
+          truncate_table(table)
+        end
+      end
+
+      tables.each do |table|
+        next if yall[table].nil?
+        load_table(table, yall[table], truncate)
+      end
     end
   end
 

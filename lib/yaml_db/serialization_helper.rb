@@ -66,8 +66,12 @@ module YamlDb
 
       def self.truncate_table(table)
         begin
+          ActiveRecord::Base.connection.execute("SET FOREIGN_KEY_CHECKS = 0")
+          ActiveRecord::Base.connection.execute("SAVEPOINT before_truncation")
           ActiveRecord::Base.connection.execute("TRUNCATE #{Utils.quote_table(table)}")
+          ActiveRecord::Base.connection.execute("SET FOREIGN_KEY_CHECKS = 1")
         rescue Exception
+          ActiveRecord::Base.connection.execute("ROLLBACK TO SAVEPOINT before_truncation")
           ActiveRecord::Base.connection.execute("DELETE FROM #{Utils.quote_table(table)}")
         end
       end
@@ -82,6 +86,7 @@ module YamlDb
       end
 
       def self.load_records(table, column_names, records)
+        return if records.nil?
         if column_names.nil?
           return
         end
@@ -164,61 +169,11 @@ module YamlDb
 
       end
 
-      def self.class_exists?(class_name)
-        klass = Module.const_get(class_name)
-        return klass.is_a?(Class)
-      rescue NameError
-        return false
-      end
-
-      def self.class_exists?(class_name)
-        klass = Module.const_get(class_name)
-        return klass.is_a?(Class)
-      rescue NameError
-        return false
-      end
-
       def self.tables
-        tables = ActiveRecord::Base.connection.tables.reject do |table|
-          ['schema_info', 'schema_migrations'].include?(table)
-        end
-        result_tables = tables.select do |table|
-          !class_exists?(table.classify)
-        end
-        tables -= result_tables
-        sort_tables = Array.new
-        while tables.length > 0
-          tables.delete_if do |table|
-            table_class = table.classify.constantize
-
-            find_undefined = table_class.reflect_on_all_associations(:belongs_to).find do |reflection|
-              if reflection.options.include?(:class_name)
-                reflection_table_name = reflection.options[:class_name].constantize.table_name
-
-                if reflection_table_name != table
-                  !sort_tables.include?(reflection.options[:class_name].constantize.table_name)
-                else
-                  false
-                end
-              else
-                !sort_tables.include?(reflection.name.to_s.classify.constantize.table_name)
-              end
-            end
-
-            if find_undefined
-              false
-            else
-              sort_tables << table
-              true
-            end
-          end
-        end
-        sort_tables + result_tables
+        ActiveRecord::Base.connection.tables.reject { |table| ['ar_internal_metadata', 'schema_info', 'schema_migrations'].include?(table) }.sort
       end
 
       def self.dump_table(io, table)
-        return if table_record_count(table).zero?
-
         dump_table_columns(io, table)
         dump_table_records(io, table)
       end
