@@ -164,6 +164,20 @@ module YamlDb
 
       end
 
+      def self.class_exists?(class_name)
+        klass = Module.const_get(class_name)
+        return klass.is_a?(Class)
+      rescue NameError
+        return false
+      end
+
+      def self.class_exists?(class_name)
+        klass = Module.const_get(class_name)
+        return klass.is_a?(Class)
+      rescue NameError
+        return false
+      end
+
       def self.tables
         tables = ActiveRecord::Base.connection.tables.reject do |table|
           ['schema_info', 'schema_migrations'].include?(table)
